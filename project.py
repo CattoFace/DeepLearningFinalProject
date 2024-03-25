@@ -4,6 +4,7 @@ import torch.nn as nn
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from color_model import ColorNet
+from pathlib import Path
 
 
 def load_data(train_ratio, lab):
@@ -74,6 +75,8 @@ def count_parameters(model):
 if __name__ == "__main__":
     # parameters:
     train_ratio, epochs, batch_size, lab, checkpoint_interval = 0.9, 20, 32, True, 1
+    # setup
+    Path("checkpoints").mkdir(exist_ok=True)  # make sure checkpoints folder exists
     torch.manual_seed(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
