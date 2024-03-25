@@ -5,40 +5,38 @@ import torch
 class DownConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(DownConv, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, (3, 3), padding=1)
         self.pool = nn.MaxPool2d(2)
-        self.relu = nn.ReLU()
+        self.conv_block = ConvBlock(in_channels, out_channels)
 
     def forward(self, x):
-        out = self.conv1(x)
-        out = self.relu(out)
-        down = self.pool(out)
-        return down
+        down = self.pool(x)
+        out = self.conv_block(down)
+        return out
 
 
 class UpConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(UpConv, self).__init__()
         self.convT = nn.ConvTranspose2d(in_channels, out_channels, 2, 2)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, (3, 3), padding=1)
-        self.relu = nn.ReLU()
+        self.conv_block = ConvBlock(in_channels, out_channels)
 
     def forward(self, x, residual):
         x = self.convT(x)
         combined = torch.cat([x, residual], dim=1)
-        out = self.conv1(combined)
-        out = self.relu(out)
+        out = self.conv_block(combined)
         return out
 
 
-class StayConv(nn.Module):
+class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(StayConv, self).__init__()
+        super(ConvBlock, self).__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, (3, 3), padding=1)
+        self.norm = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU()
 
     def forward(self, x):
         out = self.conv1(x)
+        out = self.norm(out)
         out = self.relu(out)
         return out
 
@@ -46,7 +44,7 @@ class StayConv(nn.Module):
 class ColorNet(nn.Module):
     def __init__(self):
         super(ColorNet, self).__init__()
-        self.conv1 = StayConv(1, 32)  # 512
+        self.conv1 = ConvBlock(1, 32)  # 512
         self.conv2 = DownConv(32, 64)  # 512 to 256
         self.conv3 = DownConv(64, 128)  # 256 to 128
         self.conv4 = DownConv(128, 256)  # 128 to 64
@@ -58,6 +56,7 @@ class ColorNet(nn.Module):
         self.conv_out = nn.Conv2d(32, 2, 1)  # 256 to 512
 
     def forward(self, x):
+        x = nn.functional.layer_norm(x, (512, 512))
         x1 = self.conv1(x)
         x1 = x1.view(-1, 32, 512, 512)
         x2 = self.conv2(x1)

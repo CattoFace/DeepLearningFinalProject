@@ -31,7 +31,7 @@ def train(epochs, batch_size, checkpoint_interval):
             model.train()
             optimizer.zero_grad()
             for batch in tqdm(batches, leave=False, desc="Learning", unit="Batch"):
-                batch = batch.to(device).type(torch.float16)
+                batch = batch.to(device).type(torch.float32)
                 model_input, expected_output = split_data(batch)
                 output = model(model_input)
                 loss = criterion(output, expected_output)
@@ -60,10 +60,11 @@ def evaluate(model, data, batch_size):
     with torch.no_grad():
         criterion = nn.MSELoss()
         loss = 0
-        for batch in tqdm(batches, leave=False, desc="Evaluating", unit="Batche"):
-            batch = batch.to(device).type(torch.float16)
+        for batch in tqdm(batches, leave=False, desc="Evaluating", unit="Batch"):
+            batch = batch.to(device).type(torch.float32)
             inp, expected_output = split_data(batch)
             output = model(inp)
+            breakpoint()
             loss += criterion(output, expected_output).item()
         return loss / len(data)
 
@@ -74,21 +75,27 @@ def count_parameters(model):
 
 if __name__ == "__main__":
     # parameters:
-    train_ratio, epochs, batch_size, lab, checkpoint_interval = 0.9, 20, 16, True, 1
+    train_ratio, epochs, batch_size, lab, checkpoint_interval = 0.9, 20, 8, True, 1
     # setup
     Path("checkpoints").mkdir(exist_ok=True)  # make sure checkpoints folder exists
     torch.manual_seed(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
     train_data, test_data = load_data(train_ratio, lab)
+    train_data = train_data[:100]
     print("Loaded data")
     to_train = True
-    model = ColorNet().to(device).half()
+    resume = False
+    resume_path = "checkpoints/model1"
+    model = ColorNet().to(device)
     # model: nn.Module = torch.compile(model)
     print("Parameters:", count_parameters(model))
     if to_train:
         print("Starting training")
         model.to(device)
+        if resume:
+            print(f"Resuming saved {resume_path}")
+            model.load_state_dict(torch.load(resume_path))
         train(epochs, batch_size, checkpoint_interval)
         torch.save(model.state_dict(), "model")
     else:
