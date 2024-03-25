@@ -30,7 +30,7 @@ def train(epochs, batch_size, checkpoint_interval):
         for epoch in range(1, epochs + 1):
             model.train()
             optimizer.zero_grad()
-            for batch in tqdm(batches, leave=False, desc="Learning"):
+            for batch in tqdm(batches, leave=False, desc="Learning", unit="Batch"):
                 batch = batch.to(device).type(torch.float32)
                 model_input, expected_output = split_data(batch)
                 output = model(model_input)
@@ -60,7 +60,7 @@ def evaluate(model, data, batch_size):
     with torch.no_grad():
         criterion = nn.MSELoss()
         loss = 0
-        for batch in tqdm(batches, leave=False, desc="Evaluating"):
+        for batch in tqdm(batches, leave=False, desc="Evaluating", unit="Batche"):
             batch = batch.to(device).type(torch.float32)
             inp, expected_output = split_data(batch)
             output = model(inp)
