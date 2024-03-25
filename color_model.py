@@ -10,10 +10,10 @@ class DownConv(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.relu(x)
-        x = self.pool(x)
-        return x
+        out = self.conv1(x)
+        out = self.relu(out)
+        down = self.pool(out)
+        return down
 
 
 class UpConv(nn.Module):
@@ -46,28 +46,28 @@ class StayConv(nn.Module):
 class ColorNet(nn.Module):
     def __init__(self):
         super(ColorNet, self).__init__()
-        self.conv1 = DownConv(1, 32)  # 512 to 256
-        self.conv2 = DownConv(32, 64)  # 256 to 128
-        self.conv3 = DownConv(64, 128)  # 128 to 64
-        self.conv4 = DownConv(128, 256)  # 64 to 32
-        self.mid_conv = StayConv(256, 512)  # still 32
+        self.conv1 = StayConv(1, 32)  # 512
+        self.conv2 = DownConv(32, 64)  # 512 to 256
+        self.conv3 = DownConv(64, 128)  # 256 to 128
+        self.conv4 = DownConv(128, 256)  # 128 to 64
+        self.conv5 = DownConv(256, 512)  # 64 to 32
         self.convT1 = UpConv(512, 256)  # 32 to 64
         self.convT2 = UpConv(256, 128)  # 64 to 128
         self.convT3 = UpConv(128, 64)  # 128 to 256
-        self.convT4 = UpConv(64, 32)  # 512 to 512
-        self.conv_out = nn.Conv2d(32, 2, 1, padding=1)  # 256 to 512
+        self.convT4 = UpConv(64, 32)  # 256 to 512
+        self.conv_out = nn.Conv2d(32, 2, 1)  # 256 to 512
 
     def forward(self, x):
         x1 = self.conv1(x)
-        x1 = x1.view(-1, 32, 256, 256)
+        x1 = x1.view(-1, 32, 512, 512)
         x2 = self.conv2(x1)
-        x2 = x2.view(-1, 64, 128, 128)
+        x2 = x2.view(-1, 64, 256, 256)
         x3 = self.conv3(x2)
-        x3 = x3.view(-1, 128, 64, 64)
+        x3 = x3.view(-1, 128, 128, 128)
         x4 = self.conv4(x3)
-        x4 = x4.view(-1, 256, 32, 32)
-        x5 = self.mid_conv(x4)
-        x5 = x5.view(-1, 512, 16, 16)
+        x4 = x4.view(-1, 256, 64, 64)
+        x5 = self.conv5(x4)
+        x5 = x5.view(-1, 512, 32, 32)
         y1 = self.convT1(x5, x4)
         y2 = self.convT2(y1, x3)
         y3 = self.convT3(y2, x2)

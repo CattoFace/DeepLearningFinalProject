@@ -31,7 +31,7 @@ def train(epochs, batch_size, checkpoint_interval):
             model.train()
             optimizer.zero_grad()
             for batch in tqdm(batches, leave=False, desc="Learning", unit="Batch"):
-                batch = batch.to(device).type(torch.float32)
+                batch = batch.to(device).type(torch.float16)
                 model_input, expected_output = split_data(batch)
                 output = model(model_input)
                 loss = criterion(output, expected_output)
@@ -61,7 +61,7 @@ def evaluate(model, data, batch_size):
         criterion = nn.MSELoss()
         loss = 0
         for batch in tqdm(batches, leave=False, desc="Evaluating", unit="Batche"):
-            batch = batch.to(device).type(torch.float32)
+            batch = batch.to(device).type(torch.float16)
             inp, expected_output = split_data(batch)
             output = model(inp)
             loss += criterion(output, expected_output).item()
@@ -74,7 +74,7 @@ def count_parameters(model):
 
 if __name__ == "__main__":
     # parameters:
-    train_ratio, epochs, batch_size, lab, checkpoint_interval = 0.9, 20, 32, True, 1
+    train_ratio, epochs, batch_size, lab, checkpoint_interval = 0.9, 20, 16, True, 1
     # setup
     Path("checkpoints").mkdir(exist_ok=True)  # make sure checkpoints folder exists
     torch.manual_seed(0)
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     train_data, test_data = load_data(train_ratio, lab)
     print("Loaded data")
     to_train = True
-    model = ColorNet().to(device)
+    model = ColorNet().to(device).half()
     # model: nn.Module = torch.compile(model)
     print("Parameters:", count_parameters(model))
     if to_train:
