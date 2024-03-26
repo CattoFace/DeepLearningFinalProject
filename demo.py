@@ -37,5 +37,6 @@ while True:
     image_out = Image.fromarray(
         np.asarray(torch.cat([image[:, 0], model_out]).permute((1, 2, 0))), "LAB"
     ).convert("RGB")
+    plt.title("Model Colored")
     plt.imshow(image_out)
     plt.show()
