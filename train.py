@@ -22,7 +22,7 @@ def split_data(data):
 
 def train(epochs, batch_size, checkpoint_interval):
     batches = torch.split(train_data, batch_size)
-    train_loss_list = []
+    # train_loss_list = []
     test_loss_list = []
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=10e-3, weight_decay=10e-4)
@@ -37,18 +37,19 @@ def train(epochs, batch_size, checkpoint_interval):
                 loss = criterion(output, expected_output)
                 loss.backward()
                 optimizer.step()
-            train_loss = evaluate(model, train_data, batch_size)
+            # train_loss = evaluate(model, train_data, batch_size)
             test_loss = evaluate(model, test_data, batch_size)
-            train_loss_list.append(train_loss)
+            # train_loss_list.append(train_loss)
             test_loss_list.append(test_loss)
-            pbar.set_description(f"loss: train:{train_loss:.2f}, test:{test_loss:.2f}")
+            # pbar.set_description(f"loss: train:{train_loss:.2f}, test:{test_loss:.2f}")
+            pbar.set_description(f"test loss:{test_loss:.2f}")
             pbar.update()
-            if checkpoint_interval is not None and epoch % checkpoint_interval == 0:
+            if checkpoint_interval and epoch % checkpoint_interval == 0:
                 torch.save(model.state_dict(), f"checkpoints/model{epoch}")
     plt.title("Model Loss")
     plt.xlabel("Batch")
     plt.ylabel("Loss")
-    plt.plot(np.arange(epochs), train_loss_list, color="red", label="Train")
+    # plt.plot(np.arange(epochs), train_loss_list, color="red", label="Train")
     plt.plot(np.arange(epochs), test_loss_list, color="blue", label="Test")
     plt.legend(loc="lower right")
     plt.savefig("graph.png")
@@ -64,7 +65,6 @@ def evaluate(model, data, batch_size):
             batch = batch.to(device).type(torch.float32)
             inp, expected_output = split_data(batch)
             output = model(inp)
-            breakpoint()
             loss += criterion(output, expected_output).item()
         return loss / len(data)
 
@@ -82,11 +82,10 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
     train_data, test_data = load_data(train_ratio, lab)
-    train_data = train_data[:100]
     print("Loaded data")
     to_train = True
-    resume = False
-    resume_path = "checkpoints/model1"
+    resume = True
+    resume_path = "checkpoints/model19"
     model = ColorNet().to(device)
     # model: nn.Module = torch.compile(model)
     print("Parameters:", count_parameters(model))

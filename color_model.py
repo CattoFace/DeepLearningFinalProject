@@ -36,6 +36,9 @@ class ConvBlock(nn.Module):
 
     def forward(self, x):
         out = self.conv1(x)
+        # make sure stays 4d even for single input
+        size = out.size()
+        out = out.view(-1, size[-3], size[-2], size[-1])
         out = self.norm(out)
         out = self.relu(out)
         return out
