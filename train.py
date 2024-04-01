@@ -3,70 +3,62 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from color_model import ColorNet
+from color_model import Generator, split_data
 from pathlib import Path
 
 
-def load_data(train_ratio, lab):
-    arr = torch.load("dataset_lab.pt" if lab else "dataset_ycbcr.pt")
+def load_data(train_ratio, color):
+    arr = torch.load(f"dataset_{color}.pt")
     train_len = int(len(arr) * train_ratio)
     return arr[:train_len], arr[train_len:]
 
 
-def split_data(data):
-    """
-    splits a data batch that consists of 1 luminance channel and 2 color channels to an input consisting of the luminance channel and an expected output consisting of the 2 color channels
-    """
-    return data[:, 0:1, :, :], data[:, 1:, :, :]
-
-
 def train(epochs, batch_size, checkpoint_interval):
-    batches = torch.split(train_data, batch_size)
-    # train_loss_list = []
+    train_loss_list = []
     test_loss_list = []
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=10e-3, weight_decay=10e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)  # , weight_decay=10e-5)
+    train_loss = 0
+    test_loss = 0
     with tqdm(total=epochs, unit="Epoch") as pbar:
         for epoch in range(1, epochs + 1):
+            permutation = torch.randperm(len(train_data))
+            train_data_permuted = train_data[permutation]
+            batches = torch.split(train_data_permuted, batch_size)
             model.train()
             optimizer.zero_grad()
             for batch in tqdm(batches, leave=False, desc="Learning", unit="Batch"):
-                batch = batch.to(device).type(torch.float32)
                 model_input, expected_output = split_data(batch)
                 output = model(model_input)
                 loss = criterion(output, expected_output)
                 loss.backward()
                 optimizer.step()
-            # train_loss = evaluate(model, train_data, batch_size)
-            test_loss = evaluate(model, test_data, batch_size)
-            # train_loss_list.append(train_loss)
+                train_loss = loss.item()
+                pbar.set_description(
+                    f"loss: train- {train_loss:.2f}, test- {test_loss:.2f}"
+                )
+            test_loss = evaluate(model, test_data)
+            train_loss_list.append(train_loss)
             test_loss_list.append(test_loss)
-            # pbar.set_description(f"loss: train:{train_loss:.2f}, test:{test_loss:.2f}")
-            pbar.set_description(f"test loss:{test_loss:.2f}")
             pbar.update()
             if checkpoint_interval and epoch % checkpoint_interval == 0:
                 torch.save(model.state_dict(), f"checkpoints/model{epoch}")
     plt.title("Model Loss")
     plt.xlabel("Batch")
     plt.ylabel("Loss")
-    # plt.plot(np.arange(epochs), train_loss_list, color="red", label="Train")
+    plt.plot(np.arange(epochs), train_loss_list, color="red", label="Train")
     plt.plot(np.arange(epochs), test_loss_list, color="blue", label="Test")
     plt.legend(loc="lower right")
     plt.savefig("graph.png")
 
 
-def evaluate(model, data, batch_size):
+def evaluate(model, data):
     model.eval()
-    batches = torch.split(data, batch_size)
     with torch.no_grad():
         criterion = nn.MSELoss()
-        loss = 0
-        for batch in tqdm(batches, leave=False, desc="Evaluating", unit="Batch"):
-            batch = batch.to(device).type(torch.float32)
-            inp, expected_output = split_data(batch)
-            output = model(inp)
-            loss += criterion(output, expected_output).item()
-        return loss / len(data)
+        inp, expected_output = split_data(data)
+        output = model(inp)
+        return criterion(output, expected_output).item()
 
 
 def count_parameters(model):
@@ -75,18 +67,23 @@ def count_parameters(model):
 
 if __name__ == "__main__":
     # parameters:
-    train_ratio, epochs, batch_size, lab, checkpoint_interval = 0.9, 20, 8, True, 1
+    color = "ycbcr"  # rgb/lab/ycbcr
+    train_ratio, epochs, batch_size, checkpoint_interval = 0.95, 10, 32, 1
     # setup
     Path("checkpoints").mkdir(exist_ok=True)  # make sure checkpoints folder exists
     torch.manual_seed(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    train_data, test_data = load_data(train_ratio, lab)
+    train_data, test_data = load_data(train_ratio, color)
+    train_data, test_data = (
+        train_data.to(device).type(torch.float32),
+        test_data.to(device).type(torch.float32),
+    )
     print("Loaded data")
     to_train = True
-    resume = True
-    resume_path = "checkpoints/model19"
-    model = ColorNet().to(device)
+    resume = False
+    resume_path = "model"
+    model = Generator(color).to(device)
     # model: nn.Module = torch.compile(model)
     print("Parameters:", count_parameters(model))
     if to_train:
@@ -100,5 +97,5 @@ if __name__ == "__main__":
     else:
         model.load_state_dict(torch.load("model"))
         model.to(device)
-        loss = evaluate(model, test_data, batch_size)
+        loss = evaluate(model, test_data)
         print(f"test {loss=}")
