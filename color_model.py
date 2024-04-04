@@ -4,15 +4,29 @@ from torcheval.metrics import FrechetInceptionDistance
 import torchvision.transforms.v2 as transforms
 
 to_tensor = transforms.Compose(
-    (transforms.ToImage(), transforms.ToDtype(torch.float16, scale=True))
+    (transforms.ToImage(), transforms.ToDtype(torch.float32, scale=True))
 )
 
 
-def split_data(data):
+def combine_data(gray, data, color):
+    match color:
+        case "RGB":
+            return data
+        case "HSV":
+            return torch.cat((data, gray), 1)
+        case "YCbCr":
+            return torch.cat((gray, data), 1)
+    return data
+
+
+def split_data(data, color):
     """
     splits a data batch that consists of 1 luminance channel and 2/3 color channels to an input consisting of the luminance channel and an expected output consisting of the 2 color channels
     """
-    return data[:, 0:1], data[:, 1:]
+    if color == "HSV":
+        return data[:, 2:], data[:, :2]
+    else:  # RGB/YCbCr
+        return data[:, 0:1], data[:, 1:]
 
 
 def DownConv(in_channels, leaky=True):
@@ -33,28 +47,6 @@ def UpConv(in_channels, leaky=False):
         nn.ReLU(True),
         ConvBlock(out_channels, out_channels, leaky),
     )
-
-
-# class ConvBlock(nn.Module):
-#     def __init__(self, in_channels, out_channels, leaky):
-#         super(ConvBlock, self).__init__()
-#         self.conv = nn.Conv2d(
-#             in_channels,
-#             out_channels,
-#             (3, 3),
-#             padding=1,
-#             padding_mode="reflect",
-#             bias=False,
-#         )
-#         self.norm = nn.BatchNorm2d(out_channels)
-#         self.relu = nn.LeakyReLU(0.2, True) if leaky else nn.ReLU(True)
-#
-#     def forward(self, x):
-#         # breakpoint()
-#         x1 = self.conv(x)
-#         x2 = self.norm(x1)
-#         x3 = self.relu(x2)
-#         return x3
 
 
 def ConvBlock(in_channels, out_channels, leaky=True, norm=True, relu=True):
@@ -94,7 +86,7 @@ class Generator(nn.Module):
         self.convT2 = UpConv(512)  # 32 to 64
         self.convT3 = UpConv(256)  # 64 to 128
         self.convT4 = UpConv(128)  # 64 to 128
-        self.conv_out = nn.Conv2d(64, 3 if color == "rgb" else 2, 1)  # 256
+        self.conv_out = nn.Conv2d(64, 3 if color == "RGB" else 2, 1)  # 256
         self.sig = nn.Sigmoid()
 
     def forward(self, x):
@@ -148,7 +140,7 @@ class ResidualDiscriminator(nn.Module):
 
 def SeqDiscriminator(color, patch: bool = False):
     disc = nn.Sequential(
-        ConvBlock(4 if color == "rgb" else 3, 64, True),
+        ConvBlock(4 if color == "RGB" else 3, 64, True),
         DownConv(64),
         DownConv(128),
         DownConv(256),
@@ -174,12 +166,11 @@ class FullModel(nn.Module):
         patch: bool = False,
         unet_gan: bool = True,
         wasserstein: bool = True,
-        gen_loss_weight: int | float = 10,
+        gen_loss_weight: int | float = 100,
     ) -> None:
         super(FullModel, self).__init__()
         self.color = color
         self.to_image = transforms.ToPILImage(color)
-        color = color.lower()
         self.gen = Generator(color)
         if unet_gan:
             self.disc = ResidualDiscriminator(color)
@@ -230,7 +221,7 @@ class FullModel(nn.Module):
     def step(self, data: torch.Tensor):
         self.train()
         # setup
-        gray, colors = split_data(data)
+        gray, colors = split_data(data, self.color)
         size = data.size()[0]
 
         # real step
@@ -273,7 +264,7 @@ class FullModel(nn.Module):
         self.eval()
         with torch.no_grad(), torch.autocast("cuda"):
             # setup
-            gray, colors = split_data(data)
+            gray, _ = split_data(data, self.color)
             size = data.size()[0]
             # real step
             out_real = self.disc(data)
@@ -293,12 +284,18 @@ class FullModel(nn.Module):
                 out_disc, self.label_real[:size]
             )
             # loss_gen_l1 = self.criterion_gen(out_gen, colors)
-            images = combined
-            if self.color != "RGB":
-                images = [self.to_image(image).convert("RGB") for image in images]
-                images = to_tensor(images)
-            self.fid.update(out_gen.type(torch.float32), False)
-            self.fid.update(colors.type(torch.float32), True)
+            fake_images_tensor = combine_data(gray, out_gen, self.color)
+            fake_images = [
+                self.to_image(image).convert("RGB") for image in fake_images_tensor
+            ]
+            fake_images_tensor = torch.stack(to_tensor(fake_images))
+            real_images_tensor = data if self.color != "RGB" else data[:, 1:]
+            real_images = [
+                self.to_image(image).convert("RGB") for image in real_images_tensor
+            ]
+            real_images_tensor = torch.stack(to_tensor(real_images))
+            self.fid.update(fake_images_tensor, False)
+            self.fid.update(real_images_tensor, True)
             loss_gen_fid = self.fid.compute()
             self.fid.reset()
             # finale
@@ -309,7 +306,7 @@ class FullModel(nn.Module):
                 loss_gen_fid,
                 loss_disc,
                 (accuracy / (2 * size * single_size)).item(),
-                out_gen[:samples_to_return].detach(),
+                fake_images[:samples_to_return],
             )
 
     def color_images(self, gray_images):

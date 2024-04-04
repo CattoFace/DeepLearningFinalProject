@@ -4,7 +4,6 @@ from tqdm import tqdm
 from color_model import FullModel
 from pathlib import Path
 import matplotlib.pyplot as plt
-from torchvision.transforms.v2 import ToPILImage
 
 
 def load_data(train_ratio, color):
@@ -25,19 +24,7 @@ def save_samples(samples, epoch, path):
     plt.close()
 
 
-def combine_output(model_input, model_output, color):
-    match color:
-        case "RGB":
-            return model_output
-        case "YCbCr":
-            return torch.cat((model_input, model_output), 1)
-        case "HSV":
-            return torch.cat((model_output, model_input), 1)
-    return model_output
-
-
-def train(epochs, batch_size, model, train_data, test_data, path, color):
-    to_image = ToPILImage(color)
+def train(epochs, batch_size, model, train_data, test_data, path):
     results = []  # gen_discriminated,gen_fid, disc, acc_disc
     data_len = len(train_data)
     loss_disc_train = 0
@@ -66,8 +53,6 @@ def train(epochs, batch_size, model, train_data, test_data, path, color):
             )
             torch.save(model.state_dict(), f"{path}/checkpoints/model{epoch}")
 
-            samples = combine_output(test_data[:20, 0], samples, color)
-            samples = [to_image(img).convert(("RGB")) for img in samples]
             save_samples(samples, epoch, path)
             pbar.update()
     np.savetxt(path + "/test_results.txt", results, delimiter=",", fmt="%1.2f")
@@ -131,7 +116,6 @@ def train_model(
             train_data,
             test_data,
             path,
-            color,
         )
         torch.save(model.state_dict(), f"{path}/model")
     else:

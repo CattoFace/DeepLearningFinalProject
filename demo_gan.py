@@ -10,18 +10,24 @@ device = torch.device("cuda")
 print(device)
 print("Loaded data")
 to_train = True
-color = "YCbCr"  # YCbCr/HSV
-data, _ = load_data(1, color.lower())
+color = "HSV"  # YCbCr/HSV
+data, _ = load_data(1, color)
 data = data.to(device)
-model = FullModel(color, device, patch=True).to(device)
-model.load_state_dict(torch.load("model", map_location=device))
+model = FullModel(
+    color, device, patch=False, unet_gan=False, wasserstein=False, gen_loss_weight=100
+).to(device)
+model.load_state_dict(
+    torch.load("results/basic_hsv/checkpoints/model1", map_location=device)
+)
 to_image = transforms.ToPILImage(color)
 # model: torch.nn.Module = torch.compile(model)
 model.eval()
 for i in range(1, 1000):
-    # model.load_state_dict(torch.load(f"checkpoints/model{i}", map_location=device))
+    model.load_state_dict(
+        torch.load(f"results/basic_hsv/checkpoints/model{i}", map_location=device)
+    )
     index = 3
-    index = int(input(f"select image 1-{len(data)}: ")) + 1
+    # index = int(input(f"select image 1-{len(data)}: ")) + 1
     image_in = data[index : index + 2]
     fig = plt.figure(figsize=(10, 10))
     fig.add_subplot(1, 3, 1)
@@ -35,9 +41,9 @@ for i in range(1, 1000):
     model_out = model.color_images(image_in[:, 0:1].type(torch.float16))
     breakpoint()
     if color == "YCvCr":
-        combined = torch.cat(image_in[0, 0:1], model_out)
+        combined = torch.cat((image_in[0, 0:1], model_out))
     else:
-        combined = torch.cat(model_out, image_in[0, 2:])
+        combined = torch.cat((model_out[0], image_in[0, 2:]))
     image_out = to_image(combined).convert("RGB")
     plt.title("Model Colored")
     plt.imshow(image_out)
