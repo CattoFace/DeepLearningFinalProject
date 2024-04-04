@@ -1,85 +1,100 @@
 from torch import nn
 import torch
+from torcheval.metrics import FrechetInceptionDistance
+import torchvision.transforms.v2 as transforms
+
+to_tensor = transforms.Compose(
+    (transforms.ToImage(), transforms.ToDtype(torch.float16, scale=True))
+)
 
 
 def split_data(data):
     """
-    splits a data batch that consists of 1 luminance channel and 2 color channels to an input consisting of the luminance channel and an expected output consisting of the 2 color channels
+    splits a data batch that consists of 1 luminance channel and 2/3 color channels to an input consisting of the luminance channel and an expected output consisting of the 2 color channels
     """
-    return data[:, 0:1, :, :], data[:, 1:, :, :]
+    return data[:, 0:1], data[:, 1:]
 
 
-class DownConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(DownConv, self).__init__()
-        self.pool = nn.MaxPool2d(2)
-        self.conv_block = ConvBlock(in_channels, out_channels)
-
-    def forward(self, x):
-        down = self.pool(x)
-        out = self.conv_block(down)
-        return out
+def DownConv(in_channels, leaky=True):
+    out_channels = in_channels * 2
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.LeakyReLU(0.2, True),
+        ConvBlock(out_channels, out_channels, leaky),
+    )
 
 
-class UpConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(UpConv, self).__init__()
-        self.convT = nn.ConvTranspose2d(in_channels, in_channels, 4, 2, 1)
-        self.conv_block = ConvBlock(in_channels * 2, out_channels)
-
-    def forward(self, x, residual):
-        x = self.convT(x)
-        combined = torch.cat([x, residual], dim=1)
-        out = self.conv_block(combined)
-        return out
+def UpConv(in_channels, leaky=False):
+    out_channels = in_channels // 4
+    return nn.Sequential(
+        nn.ConvTranspose2d(in_channels, out_channels, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(True),
+        ConvBlock(out_channels, out_channels, leaky),
+    )
 
 
-class ConvMiniBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(ConvMiniBlock, self).__init__()
-        self.conv = nn.Conv2d(
-            in_channels, out_channels, (3, 3), padding=1, padding_mode="reflect"
+# class ConvBlock(nn.Module):
+#     def __init__(self, in_channels, out_channels, leaky):
+#         super(ConvBlock, self).__init__()
+#         self.conv = nn.Conv2d(
+#             in_channels,
+#             out_channels,
+#             (3, 3),
+#             padding=1,
+#             padding_mode="reflect",
+#             bias=False,
+#         )
+#         self.norm = nn.BatchNorm2d(out_channels)
+#         self.relu = nn.LeakyReLU(0.2, True) if leaky else nn.ReLU(True)
+#
+#     def forward(self, x):
+#         # breakpoint()
+#         x1 = self.conv(x)
+#         x2 = self.norm(x1)
+#         x3 = self.relu(x2)
+#         return x3
+
+
+def ConvBlock(in_channels, out_channels, leaky=True, norm=True, relu=True):
+    model = [
+        nn.Conv2d(
+            in_channels,
+            out_channels,
+            (3, 3),
+            padding=1,
+            padding_mode="reflect",
+            bias=not norm,
         )
-        self.norm = nn.BatchNorm2d(out_channels)
-        self.relu = nn.LeakyReLU(0.2)
+    ]
+    if norm:
+        model += [nn.BatchNorm2d(out_channels)]
+    if relu:
+        model += [nn.LeakyReLU(0.2, True) if leaky else nn.ReLU(True)]
+    return nn.Sequential(*model)
 
+
+class View(nn.Module):
     def forward(self, x):
-        out = self.conv(x)
-        # make sure stays 4d even for single input
-        size = out.size()
-        out = out.view(-1, size[-3], size[-2], size[-1])
-        out = self.norm(out)
-        out = self.relu(out)
-        return out
-
-
-class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(ConvBlock, self).__init__()
-        self.mini_conv1 = ConvMiniBlock(in_channels, out_channels)
-        self.mini_conv2 = ConvMiniBlock(out_channels, out_channels)
-        self.mini_conv3 = ConvMiniBlock(out_channels, out_channels)
-
-    def forward(self, x):
-        out = self.mini_conv1(x)
-        out = self.mini_conv2(out)
-        out = self.mini_conv3(out)
-        return out
+        size = x.size()
+        return x.view(-1, size[-3], size[-2], size[-1])
 
 
 class Generator(nn.Module):
     def __init__(self, color: str):
         super(Generator, self).__init__()
-        self.conv1 = ConvBlock(1, 32)  # 256
-        self.conv2 = DownConv(32, 64)  # 256 to 128
-        self.conv3 = DownConv(64, 128)  # 128 to 64
-        self.conv4 = DownConv(128, 256)  # 64 to 32
-        self.conv5 = DownConv(256, 256)  # 32 to 16
-        self.convT1 = UpConv(256, 128)  # 16 to 32
-        self.convT2 = UpConv(128, 64)  # 32 to 64
-        self.convT3 = UpConv(64, 32)  # 64 to 128
-        self.convT4 = UpConv(32, 32)  # 128 to 256
-        self.conv_out = nn.Conv2d(32, 3 if color == "rgb" else 2, 1)  # 256
+        self.conv1 = ConvBlock(1, 32, True)  # 256
+        self.conv2 = DownConv(32)  # 256 to 128
+        self.conv3 = DownConv(64)  # 128 to 64
+        self.conv4 = DownConv(128)  # 64 to 32
+        self.conv5 = DownConv(256)  # 64 to 32
+        self.conv6 = ConvBlock(512, 512, True)
+        self.convT1 = UpConv(1024)  # 16 to 32
+        self.convT2 = UpConv(512)  # 32 to 64
+        self.convT3 = UpConv(256)  # 64 to 128
+        self.convT4 = UpConv(128)  # 64 to 128
+        self.conv_out = nn.Conv2d(64, 3 if color == "rgb" else 2, 1)  # 256
         self.sig = nn.Sigmoid()
 
     def forward(self, x):
@@ -88,76 +103,221 @@ class Generator(nn.Module):
         x3 = self.conv3(x2)
         x4 = self.conv4(x3)
         x5 = self.conv5(x4)
-        y1 = self.convT1(x5, x4)
-        y2 = self.convT2(y1, x3)
-        y3 = self.convT3(y2, x2)
-        y4 = self.convT4(y3, x1)
-        out = self.conv_out(y4)
-        out = self.sig(out) * 255
+        x6 = self.conv6(x5)
+        y1 = self.convT1(torch.cat((x6, x5), 1))
+        y2 = self.convT2(torch.cat((y1, x4), 1))
+        y3 = self.convT3(torch.cat((y2, x3), 1))
+        y4 = self.convT4(torch.cat((y3, x2), 1))
+        out = self.conv_out(torch.cat((y4, x1), 1))
+        out = self.sig(out)
+        # out.clamp(0, 255)
         return out
 
 
-class Discriminator(nn.Module):
-    def __init__(self, color: str):
-        super(Discriminator, self).__init__()
-        self.conv1 = DownConv(3 if color == "rgb" else 2, 64)
-        self.conv2 = DownConv(64, 128)
-        self.conv3 = DownConv(128, 256)
-        self.fc = nn.LazyLinear(512)
-        self.relu = nn.LeakyReLU(0.2)
-        self.fc_out = nn.Linear(512, 1)
-        self.activation = nn.Sigmoid()
+class ResidualDiscriminator(nn.Module):
+    def __init__(self, color):
+        super(ResidualDiscriminator, self).__init__()
+        self.conv1 = ConvBlock(4 if color == "rgb" else 3, 32, True)  # 256
+        self.conv2 = DownConv(32)  # 256 to 128
+        self.conv3 = DownConv(64)  # 128 to 64
+        self.conv4 = DownConv(128)  # 64 to 32
+        self.conv5 = DownConv(256)  # 64 to 32
+        self.conv6 = ConvBlock(512, 512, True)
+        self.convT1 = UpConv(1024)  # 16 to 32
+        self.convT2 = UpConv(512)  # 32 to 64
+        self.convT3 = UpConv(256)  # 64 to 128
+        self.convT4 = UpConv(128)  # 64 to 128
+        self.conv_out = nn.Conv2d(64, 1, 1)  # 256
+        self.flat = nn.Flatten()
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
-        x = self.fc(x)
-        x = self.relu(x)
-        x = self.fc_out(x)
-        x = self.activation(x)
-        return x
+        x1 = self.conv1(x)
+        x2 = self.conv2(x1)
+        x3 = self.conv3(x2)
+        x4 = self.conv4(x3)
+        x5 = self.conv5(x4)
+        x6 = self.conv6(x5)
+        y1 = self.convT1(torch.cat((x6, x5), 1))
+        y2 = self.convT2(torch.cat((y1, x4), 1))
+        y3 = self.convT3(torch.cat((y2, x3), 1))
+        y4 = self.convT4(torch.cat((y3, x2), 1))
+        out = self.conv_out(torch.cat((y4, x1), 1))
+        out = self.flat(out)
+        return out
+
+
+def SeqDiscriminator(color, patch: bool = False):
+    disc = nn.Sequential(
+        ConvBlock(4 if color == "rgb" else 3, 64, True),
+        DownConv(64),
+        DownConv(128),
+        DownConv(256),
+        nn.Conv2d(512, 1, 1),
+        nn.Flatten(),
+    )
+    if not patch:
+        disc = nn.Sequential(
+            disc,
+            nn.LazyLinear(1024),
+            nn.LeakyReLU(0.2),
+            nn.Linear(1024, 1),
+        )
+    return disc
 
 
 class FullModel(nn.Module):
-    def __init__(self, color: str, lr) -> None:
+    def __init__(
+        self,
+        color: str,
+        device,
+        lr: float = 5e-4,
+        patch: bool = False,
+        unet_gan: bool = True,
+        wasserstein: bool = True,
+        gen_loss_weight: int | float = 10,
+    ) -> None:
         super(FullModel, self).__init__()
+        self.color = color
+        self.to_image = transforms.ToPILImage(color)
+        color = color.lower()
         self.gen = Generator(color)
-        self.disc = Discriminator(color)
-        self.criterion = nn.BCELoss()
-        self.genOptim = torch.optim.Adam(self.gen.parameters(), lr)
-        self.discOptim = torch.optim.Adam(self.disc.parameters(), lr)
-        self.label_real = torch.full((1024,), 1)
-        self.label_fake = torch.full((1024,), 0)
+        if unet_gan:
+            self.disc = ResidualDiscriminator(color)
+        else:
+            self.disc = SeqDiscriminator(color, patch)
+        self.wasserstein = wasserstein
+        self.criterion_disc = nn.BCEWithLogitsLoss()
+        self.criterion_gen = nn.L1Loss()
+        self.genOptim = torch.optim.Adam(self.gen.parameters(), lr, betas=(0.5, 0.999))
+        self.discOptim = torch.optim.Adam(
+            self.disc.parameters(), lr, betas=(0.5, 0.999)
+        )
+        self.l1_loss_weight = gen_loss_weight
+        self.device = device
+        self.label_real: torch.Tensor = None
+        self.label_fake: torch.Tensor = None
+        self.fid = FrechetInceptionDistance()
+
+    def check_buffers(self, single_size):
+        if self.label_real is None:
+            # label smoothing
+            self.label_real = torch.full(
+                (1024, single_size), 0.9, dtype=torch.float16, device=self.device
+            )
+            self.register_buffer("real", self.label_real, False)
+            self.label_fake = torch.full(
+                (1024, single_size), 0.1, dtype=torch.float16, device=self.device
+            )
+            self.register_buffer("fake", self.label_fake, False)
+
+    def calc_disc_loss(self, output, real, size, single_size):
+        self.check_buffers(single_size)
+        if self.wasserstein:
+            return -output.mean() if real else output.mean()
+        else:
+            return self.criterion_disc(
+                output, self.label_real[:size] if real else self.label_fake[:size]
+            )
+
+    def combine_gen_output(self, gen_input, gen_output):
+        match self.color:
+            case "YCbCr" | "RGB":
+                return torch.cat((gen_input, gen_output), 1)
+            case "HSV":
+                return torch.cat((gen_output, gen_input), 1)
+        return gen_output
 
     def step(self, data: torch.Tensor):
+        self.train()
         # setup
         gray, colors = split_data(data)
         size = data.size()[0]
 
         # real step
         self.disc.zero_grad()
-        out_real = self.disc(colors)
-        loss_real = self.criterion(out_real, self.label_real[:size])
-        loss_real.backward()
-
-        # fake step
-        out_gen = self.gen(gray)
-        # discriminator
-        out_fake = self.disc(out_gen)
-        loss_fake = self.criterion(out_fake, self.label_fake[:size])
-        loss_fake.backward()
-        loss_disc = loss_real + loss_fake
+        with torch.autocast(device_type="cuda"):
+            out_disc_real = self.disc(data)
+            single_size = out_disc_real.size()[1]
+            loss_disc_real = self.calc_disc_loss(out_disc_real, True, size, single_size)
+            del out_disc_real
+            # fake step
+            out_gen = self.gen(gray)
+            # discriminator
+            in_disc_fake = self.combine_gen_output(gray, out_gen.detach())
+            out_disc_fake = self.disc(in_disc_fake)
+            loss_disc_fake = self.calc_disc_loss(
+                out_disc_fake, False, size, single_size
+            )
+            del out_disc_fake
+            loss_disc = loss_disc_real + loss_disc_fake
+            loss_disc.backward()
         self.discOptim.step()
         # generator
         self.gen.zero_grad()
-        # again because we did a step on the discriminator
-        out_fake = self.disc(out_gen)
-        loss_gen = self.criterion(out_fake, self.label_real[:size])
-        loss_gen.backward()
+        with torch.autocast(device_type="cuda"):
+            # again because we did a step on the discriminator
+            out_disc_fake = self.disc(self.combine_gen_output(gray, out_gen))
+            # True because generator wants disc to be wrong
+            loss_gen_disc = self.calc_disc_loss(out_disc_fake, True, size, single_size)
+            loss_gen_l1 = self.criterion_gen(out_gen, colors) * self.l1_loss_weight
+            del out_disc_fake
+            # test other methods like multiplication
+            loss_gen = loss_gen_disc + loss_gen_l1
+            loss_gen.backward()
         self.genOptim.step()
 
-        # finale
         loss_disc = loss_disc.mean().item()
-        loss_gen = loss_gen.mean().item()
-        return loss_disc, loss_gen
+        return loss_gen_disc, loss_gen_l1.mean().item(), loss_disc
+
+    def test(self, data, samples_to_return: int):
+        self.eval()
+        with torch.no_grad(), torch.autocast("cuda"):
+            # setup
+            gray, colors = split_data(data)
+            size = data.size()[0]
+            # real step
+            out_real = self.disc(data)
+            single_size = out_real.size()[1]
+            loss_disc_real = self.calc_disc_loss(out_real, True, size, single_size)
+            accuracy = (out_real >= 0).sum()
+            del out_real
+            # fake step
+            out_gen = self.gen(gray)
+            combined = self.combine_gen_output(gray, out_gen)
+            out_disc = self.disc(combined)
+            loss_disc_fake = self.calc_disc_loss(out_disc, False, size, single_size)
+            loss_disc = loss_disc_real + loss_disc_fake
+            loss_disc = loss_disc.mean().item()
+            accuracy += (out_disc <= 0).sum()
+            loss_gen_discriminated = self.criterion_disc(
+                out_disc, self.label_real[:size]
+            )
+            # loss_gen_l1 = self.criterion_gen(out_gen, colors)
+            images = combined
+            if self.color != "RGB":
+                images = [self.to_image(image).convert("RGB") for image in images]
+                images = to_tensor(images)
+            self.fid.update(out_gen.type(torch.float32), False)
+            self.fid.update(colors.type(torch.float32), True)
+            loss_gen_fid = self.fid.compute()
+            self.fid.reset()
+            # finale
+            loss_gen_discriminated = loss_gen_discriminated.mean().item()
+            loss_gen_fid = loss_gen_fid.mean().item()
+            return (
+                loss_gen_discriminated,
+                loss_gen_fid,
+                loss_disc,
+                (accuracy / (2 * size * single_size)).item(),
+                out_gen[:samples_to_return].detach(),
+            )
+
+    def color_images(self, gray_images):
+        self.eval()
+        with torch.no_grad(), torch.autocast("cuda"):
+            return self.gen(gray_images).detach()
+
+    def discriminate_images(self, color_images):
+        self.eval()
+        with torch.no_grad(), torch.autocast("cuda"):
+            return self.disc(color_images).detach()

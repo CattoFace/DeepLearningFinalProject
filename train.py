@@ -16,8 +16,8 @@ def load_data(train_ratio, color):
 def train(epochs, batch_size, checkpoint_interval):
     train_loss_list = []
     test_loss_list = []
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)  # , weight_decay=10e-5)
+    criterion = nn.L1Loss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, betas=(0.5, 0.999))
     train_loss = 0
     test_loss = 0
     with tqdm(total=epochs, unit="Epoch") as pbar:
@@ -29,11 +29,12 @@ def train(epochs, batch_size, checkpoint_interval):
             optimizer.zero_grad()
             for batch in tqdm(batches, leave=False, desc="Learning", unit="Batch"):
                 model_input, expected_output = split_data(batch)
-                output = model(model_input)
+                with torch.autocast("cuda"):
+                    output = model(model_input)
                 loss = criterion(output, expected_output)
                 loss.backward()
-                optimizer.step()
                 train_loss = loss.item()
+                optimizer.step()
                 pbar.set_description(
                     f"loss: train- {train_loss:.2f}, test- {test_loss:.2f}"
                 )
@@ -54,8 +55,8 @@ def train(epochs, batch_size, checkpoint_interval):
 
 def evaluate(model, data):
     model.eval()
-    with torch.no_grad():
-        criterion = nn.MSELoss()
+    with torch.no_grad(), torch.autocast("cuda"):
+        criterion = nn.L1Loss()
         inp, expected_output = split_data(data)
         output = model(inp)
         return criterion(output, expected_output).item()
@@ -68,7 +69,7 @@ def count_parameters(model):
 if __name__ == "__main__":
     # parameters:
     color = "ycbcr"  # rgb/lab/ycbcr
-    train_ratio, epochs, batch_size, checkpoint_interval = 0.95, 10, 32, 1
+    train_ratio, epochs, batch_size, checkpoint_interval = 0.99, 10, 32, 1
     # setup
     Path("checkpoints").mkdir(exist_ok=True)  # make sure checkpoints folder exists
     torch.manual_seed(0)
@@ -76,13 +77,14 @@ if __name__ == "__main__":
     print(device)
     train_data, test_data = load_data(train_ratio, color)
     train_data, test_data = (
-        train_data.to(device).type(torch.float32),
-        test_data.to(device).type(torch.float32),
+        train_data.to(device).type(torch.float16),
+        test_data.to(device).type(torch.float16),
     )
     print("Loaded data")
     to_train = True
     resume = False
     resume_path = "model"
+    # model = NewGenerator(color).to(device)
     model = Generator(color).to(device)
     # model: nn.Module = torch.compile(model)
     print("Parameters:", count_parameters(model))
