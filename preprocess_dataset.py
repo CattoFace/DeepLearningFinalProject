@@ -4,7 +4,7 @@ import torchvision.transforms.v2 as transforms
 from tqdm import tqdm
 from PIL import Image
 
-color = "HSV"
+color = "YCbCr"
 size = 128
 images = glob("dataset/*.jpg")
 t = transforms.Compose(

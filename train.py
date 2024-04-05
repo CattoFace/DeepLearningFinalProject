@@ -1,21 +1,25 @@
-import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 from color_model import Generator, split_data
 from pathlib import Path
+
+from torcheval.metrics import FrechetInceptionDistance
+import torchvision.transforms.v2 as transforms
+
+to_image = transforms.ToPILImage()
 
 
 def load_data(train_ratio, color):
     arr = torch.load(f"dataset_{color}.pt")
+    permutation = torch.randperm(arr.size()[0])
+    arr = arr[permutation]
     train_len = int(len(arr) * train_ratio)
     return arr[:train_len], arr[train_len:]
 
 
 def train(epochs, batch_size, checkpoint_interval):
-    train_loss_list = []
-    test_loss_list = []
     criterion = nn.L1Loss()
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, betas=(0.5, 0.999))
     train_loss = 0
@@ -28,38 +32,46 @@ def train(epochs, batch_size, checkpoint_interval):
             model.train()
             optimizer.zero_grad()
             for batch in tqdm(batches, leave=False, desc="Learning", unit="Batch"):
-                model_input, expected_output = split_data(batch)
+                model_input, expected_output = split_data(batch, color)
                 with torch.autocast("cuda"):
                     output = model(model_input)
-                loss = criterion(output, expected_output)
+                    loss = criterion(output, expected_output)
                 loss.backward()
                 train_loss = loss.item()
                 optimizer.step()
                 pbar.set_description(
-                    f"loss: train- {train_loss:.2f}, test- {test_loss:.2f}"
+                    f"train loss- {train_loss:.2f}, test fid- {test_loss:.2f}"
                 )
-            test_loss = evaluate(model, test_data)
-            train_loss_list.append(train_loss)
-            test_loss_list.append(test_loss)
+            test_loss = evaluate(model, test_data, epoch)
             pbar.update()
             if checkpoint_interval and epoch % checkpoint_interval == 0:
-                torch.save(model.state_dict(), f"checkpoints/model{epoch}")
-    plt.title("Model Loss")
-    plt.xlabel("Batch")
-    plt.ylabel("Loss")
-    plt.plot(np.arange(epochs), train_loss_list, color="red", label="Train")
-    plt.plot(np.arange(epochs), test_loss_list, color="blue", label="Test")
-    plt.legend(loc="lower right")
-    plt.savefig("graph.png")
+                torch.save(
+                    model.state_dict(), f"results/no_gan/checkpoints/model{epoch}"
+                )
 
 
-def evaluate(model, data):
+fid = FrechetInceptionDistance()
+
+
+def evaluate(model, data, epoch):
     model.eval()
     with torch.no_grad(), torch.autocast("cuda"):
-        criterion = nn.L1Loss()
-        inp, expected_output = split_data(data)
-        output = model(inp)
-        return criterion(output, expected_output).item()
+        inp, expected_output = split_data(data, color)
+        expected_output = expected_output.type(torch.float32)
+        output = model(inp).type(torch.float32)
+        fid.update(output, False)
+        fid.update(expected_output, True)
+        loss_fid = fid.compute()
+        fid.reset()
+        fig = plt.figure(figsize=(10, 10))
+        samples = [to_image(image) for image in output[:20]]
+        plt.title(f"Epoch {epoch}")
+        for i, sample in enumerate(samples):
+            fig.add_subplot(4, 5, i + 1)
+            plt.imshow(sample)
+        plt.savefig(f"results/no_gan/samples{epoch}.png")
+        plt.close()
+        return loss_fid
 
 
 def count_parameters(model):
@@ -68,10 +80,12 @@ def count_parameters(model):
 
 if __name__ == "__main__":
     # parameters:
-    color = "ycbcr"  # rgb/lab/ycbcr
-    train_ratio, epochs, batch_size, checkpoint_interval = 0.99, 10, 32, 1
+    color = "RGB"  # rgb/lab/ycbcr
+    train_ratio, epochs, batch_size, checkpoint_interval = 0.98, 30, 32, 1
     # setup
-    Path("checkpoints").mkdir(exist_ok=True)  # make sure checkpoints folder exists
+    Path("results/no_gan/checkpoints").mkdir(
+        exist_ok=True, parents=True
+    )  # make sure checkpoints folder exists
     torch.manual_seed(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
@@ -95,9 +109,9 @@ if __name__ == "__main__":
             print(f"Resuming saved {resume_path}")
             model.load_state_dict(torch.load(resume_path))
         train(epochs, batch_size, checkpoint_interval)
-        torch.save(model.state_dict(), "model")
+        torch.save(model.state_dict(), "results/no_gan/model")
     else:
         model.load_state_dict(torch.load("model"))
         model.to(device)
-        loss = evaluate(model, test_data)
+        loss = evaluate(model, test_data, 0)
         print(f"test {loss=}")

@@ -33,23 +33,42 @@ def train(epochs, batch_size, model, train_data, test_data, path):
             permutation = torch.randperm(data_len)
             train_data_permuted = train_data[permutation]
             batches = torch.split(train_data_permuted, batch_size)
+            loss_gen_disc_train = 0
+            loss_disc_train = 0
+            loss_gen_l1_train = 0
             with tqdm(
                 total=data_len, unit=" Image", desc="Learning", leave=False
             ) as pbar_inner:
                 for batch in batches:
-                    loss_gen_binary_train, loss_gen_l1_train, loss_disc_train = (
+                    loss_gen_disc_train, loss_gen_l1_train, loss_disc_train = (
                         model.step(batch)
                     )
                     pbar_inner.update(len(batch))
                     pbar_inner.set_description(
-                        f"train loss - gen: (binary:{loss_gen_binary_train:.2f}, l1:{loss_gen_l1_train:.2f}), disc: {loss_disc_train:.2f})"
+                        f"train loss - gen: (binary:{loss_gen_disc_train:.2f}, l1:{loss_gen_l1_train:.2f}), disc: {loss_disc_train:.2f})"
                     )
-            gen_discriminated, gen_fid, disc, acc_disc, samples = model.test(
-                test_data, 20
+            (
+                loss_gen_disc_test,
+                fid,
+                loss_disc_test,
+                acc_disc,
+                samples,
+                loss_gen_l1_test,
+            ) = model.test(test_data, 20)
+            results.append(
+                (
+                    loss_gen_disc_train,
+                    loss_gen_disc_test,
+                    loss_disc_train,
+                    loss_disc_test,
+                    loss_gen_l1_train,
+                    loss_gen_l1_test,
+                    acc_disc,
+                    fid,
+                )
             )
-            results.append((gen_discriminated, gen_fid, disc, acc_disc))
             pbar.set_description(
-                f"test gen loss: (binary:{gen_discriminated:.2f}, FID:{gen_fid:.2f}), disc acc: {acc_disc:.2f}"
+                f"test gen loss: (binary:{loss_gen_disc_test:.2f}, FID:{fid:.2f}), disc acc: {acc_disc:.2f}"
             )
             torch.save(model.state_dict(), f"{path}/checkpoints/model{epoch}")
 
@@ -72,6 +91,7 @@ def train_model(
     gen_weight: int | float,
     color: str,
     path: str,
+    test_only: bool = False,
 ):
     path = "results/" + path
     # parameters:
@@ -89,7 +109,6 @@ def train_model(
         test_data.to(device),
     )
     print("Loaded data")
-    to_train = True
     resume = False
     resume_path = "model"
     model = FullModel(
@@ -103,7 +122,7 @@ def train_model(
     ).to(device)
     # model: torch.nn.Module = torch.compile(model)
     print("Parameters:", count_parameters(model, train_data[:2]))
-    if to_train:
+    if not test_only:
         print("Starting training")
         model.to(device)
         if resume:
@@ -121,11 +140,20 @@ def train_model(
     else:
         model.load_state_dict(torch.load(f"{path}/model"))
         model.to(device)
-        loss_gen_disc, loss_gen_fid, loss_disc, loss_disc, _ = model.test(test_data, 0)
+        (
+            loss_gen_disc_test,
+            fid,
+            loss_disc_test,
+            acc_disc,
+            samples,
+            loss_gen_l1_test,
+        ) = model.test(test_data[20:], 20)
+        save_samples(samples, 100, path)
+
         print(
-            f"test loss: gen- (disc:{loss_gen_disc:.2f},l1:{loss_gen_fid}), disc- {loss_disc:.2f}"
+            f"test loss: gen- (disc:{loss_gen_disc_test:.2f},l1:{loss_gen_l1_test}, FID:{fid}), disc- (BCE:{loss_disc_test:.2f}, accuracy:{acc_disc})"
         )
 
 
 if __name__ == "__main__":
-    train_model(64, 5, True, True, True, 100, "RGB", "unet_west_rgb_10")
+    train_model(64, 100, False, True, False, 512, "RGB", "final_unet_RGB", True)

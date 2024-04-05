@@ -76,17 +76,17 @@ class View(nn.Module):
 class Generator(nn.Module):
     def __init__(self, color: str):
         super(Generator, self).__init__()
-        self.conv1 = ConvBlock(1, 32, True)  # 256
-        self.conv2 = DownConv(32)  # 256 to 128
-        self.conv3 = DownConv(64)  # 128 to 64
-        self.conv4 = DownConv(128)  # 64 to 32
-        self.conv5 = DownConv(256)  # 64 to 32
+        self.conv1 = ConvBlock(1, 32, True)
+        self.conv2 = DownConv(32)
+        self.conv3 = DownConv(64)
+        self.conv4 = DownConv(128)
+        self.conv5 = DownConv(256)
         self.conv6 = ConvBlock(512, 512, True)
-        self.convT1 = UpConv(1024)  # 16 to 32
-        self.convT2 = UpConv(512)  # 32 to 64
-        self.convT3 = UpConv(256)  # 64 to 128
-        self.convT4 = UpConv(128)  # 64 to 128
-        self.conv_out = nn.Conv2d(64, 3 if color == "RGB" else 2, 1)  # 256
+        self.convT1 = UpConv(1024)
+        self.convT2 = UpConv(512)
+        self.convT3 = UpConv(256)
+        self.convT4 = UpConv(128)
+        self.conv_out = nn.Conv2d(64, 3 if color == "RGB" else 2, 1)
         self.sig = nn.Sigmoid()
 
     def forward(self, x):
@@ -109,17 +109,17 @@ class Generator(nn.Module):
 class ResidualDiscriminator(nn.Module):
     def __init__(self, color):
         super(ResidualDiscriminator, self).__init__()
-        self.conv1 = ConvBlock(4 if color == "rgb" else 3, 32, True)  # 256
-        self.conv2 = DownConv(32)  # 256 to 128
-        self.conv3 = DownConv(64)  # 128 to 64
-        self.conv4 = DownConv(128)  # 64 to 32
-        self.conv5 = DownConv(256)  # 64 to 32
+        self.conv1 = ConvBlock(4 if color == "RGB" else 3, 32, True)  # 256
+        self.conv2 = DownConv(32)
+        self.conv3 = DownConv(64)
+        self.conv4 = DownConv(128)
+        self.conv5 = DownConv(256)
         self.conv6 = ConvBlock(512, 512, True)
-        self.convT1 = UpConv(1024)  # 16 to 32
-        self.convT2 = UpConv(512)  # 32 to 64
-        self.convT3 = UpConv(256)  # 64 to 128
-        self.convT4 = UpConv(128)  # 64 to 128
-        self.conv_out = nn.Conv2d(64, 1, 1)  # 256
+        self.convT1 = UpConv(1024)
+        self.convT2 = UpConv(512)
+        self.convT3 = UpConv(256)
+        self.convT4 = UpConv(128)
+        self.conv_out = nn.Conv2d(64, 1, 1)
         self.flat = nn.Flatten()
 
     def forward(self, x):
@@ -190,6 +190,9 @@ class FullModel(nn.Module):
         self.fid = FrechetInceptionDistance()
 
     def check_buffers(self, single_size):
+        """
+        Makes sure the BCE target tensors exist and are in the right size before using them
+        """
         if self.label_real is None:
             # label smoothing
             self.label_real = torch.full(
@@ -202,6 +205,9 @@ class FullModel(nn.Module):
             self.register_buffer("fake", self.label_fake, False)
 
     def calc_disc_loss(self, output, real, size, single_size):
+        """
+        Calculates the loss for the discriminator
+        """
         self.check_buffers(single_size)
         if self.wasserstein:
             return -output.mean() if real else output.mean()
@@ -211,6 +217,9 @@ class FullModel(nn.Module):
             )
 
     def combine_gen_output(self, gen_input, gen_output):
+        """
+        Combined the given generator input and output to the same format as the input dataset
+        """
         match self.color:
             case "YCbCr" | "RGB":
                 return torch.cat((gen_input, gen_output), 1)
@@ -219,6 +228,9 @@ class FullModel(nn.Module):
         return gen_output
 
     def step(self, data: torch.Tensor):
+        """
+        Perform a single training step
+        """
         self.train()
         # setup
         gray, colors = split_data(data, self.color)
@@ -256,15 +268,20 @@ class FullModel(nn.Module):
             loss_gen = loss_gen_disc + loss_gen_l1
             loss_gen.backward()
         self.genOptim.step()
-
-        loss_disc = loss_disc.mean().item()
-        return loss_gen_disc, loss_gen_l1.mean().item(), loss_disc
+        return (
+            loss_gen_disc.mean().item(),
+            loss_gen_l1.mean().item(),
+            loss_disc.mean().item(),
+        )
 
     def test(self, data, samples_to_return: int):
+        """
+        Calculate FID and return samples generated from the given data using the generator
+        """
         self.eval()
         with torch.no_grad(), torch.autocast("cuda"):
             # setup
-            gray, _ = split_data(data, self.color)
+            gray, colors = split_data(data, self.color)
             size = data.size()[0]
             # real step
             out_real = self.disc(data)
@@ -274,16 +291,20 @@ class FullModel(nn.Module):
             del out_real
             # fake step
             out_gen = self.gen(gray)
+            loss_gen_l1 = (
+                self.criterion_gen(out_gen, colors).mean().item() * self.l1_loss_weight
+            )
             combined = self.combine_gen_output(gray, out_gen)
             out_disc = self.disc(combined)
             loss_disc_fake = self.calc_disc_loss(out_disc, False, size, single_size)
             loss_disc = loss_disc_real + loss_disc_fake
             loss_disc = loss_disc.mean().item()
             accuracy += (out_disc <= 0).sum()
+
+            # FID calculation and samples creation
             loss_gen_discriminated = self.criterion_disc(
                 out_disc, self.label_real[:size]
             )
-            # loss_gen_l1 = self.criterion_gen(out_gen, colors)
             fake_images_tensor = combine_data(gray, out_gen, self.color)
             fake_images = [
                 self.to_image(image).convert("RGB") for image in fake_images_tensor
@@ -307,6 +328,7 @@ class FullModel(nn.Module):
                 loss_disc,
                 (accuracy / (2 * size * single_size)).item(),
                 fake_images[:samples_to_return],
+                loss_gen_l1,
             )
 
     def color_images(self, gray_images):
