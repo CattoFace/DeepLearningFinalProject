@@ -165,8 +165,8 @@ class FullModel(nn.Module):
         lr: float = 5e-4,
         patch: bool = False,
         unet_gan: bool = True,
-        wasserstein: bool = True,
-        gen_loss_weight: int | float = 100,
+        wasserstein: bool = False,
+        gen_loss_weight: int | float = 512,
     ) -> None:
         super(FullModel, self).__init__()
         self.color = color
