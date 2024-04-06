@@ -330,13 +330,3 @@ class FullModel(nn.Module):
                 fake_images[:samples_to_return],
                 loss_gen_l1,
             )
-
-    def color_images(self, gray_images):
-        self.eval()
-        with torch.no_grad(), torch.autocast("cuda"):
-            return self.gen(gray_images).detach()
-
-    def discriminate_images(self, color_images):
-        self.eval()
-        with torch.no_grad(), torch.autocast("cuda"):
-            return self.disc(color_images).detach()

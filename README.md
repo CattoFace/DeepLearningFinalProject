@@ -6,7 +6,6 @@ Change any desired value in preprocess_dataset.py or preprocess_dataset_rgb.py(n
 Run preprocess_dataset.py/preprocess_dataset_rgb.py
 Change any desired model/training parameter in train_gan.py.
 Run train_gan.py.
-When training is over, run demo_gan.py or demo_gan_rgb.py
 
 ## Evaluation Only:
 Place all the dataset images in a folder called dataset(we used https://www.robots.ox.ac.uk/~vgg/data/flowers/102/).
