@@ -1,8 +1,5 @@
-import numpy as np
 import torch
-from tqdm import tqdm
 from color_model import FullModel
-from pathlib import Path
 import matplotlib.pyplot as plt
 
 
@@ -14,7 +11,7 @@ def load_data(train_ratio, color):
     return arr[:train_len], arr[train_len:]
 
 
-def save_samples(samples, epoch, path):
+def save_samples(samples):
     fig = plt.figure(figsize=(10, 10))
     plt.title("Samples")
     for i, sample in enumerate(samples):
@@ -24,18 +21,18 @@ def save_samples(samples, epoch, path):
     plt.close()
 
 
-
 def count_parameters(model, sample):
     model.test(sample, 0)
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-
     # parameters:
+
+
 train_ratio = 0.98
 torch.manual_seed(0)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
-train_data, test_data = load_data(train_ratio, color)
+train_data, test_data = load_data(train_ratio, "RGB")
 train_data, test_data = (
     train_data.to(device),
     test_data.to(device),
@@ -50,7 +47,7 @@ model = FullModel(
     gen_loss_weight=512,
 ).to(device)
 print("Parameters:", count_parameters(model, train_data[:2]))
-model.load_state_dict(torch.load(f"{path}/model"))
+model.load_state_dict(torch.load("model"))
 model.to(device)
 (
     loss_gen_disc_test,
